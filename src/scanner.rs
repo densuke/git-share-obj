@@ -1,5 +1,6 @@
 //! Gitオブジェクトファイルの探索
 
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -77,6 +78,45 @@ pub fn scan_git_objects(base_path: &Path) -> Vec<GitObjectInfo> {
     }
 
     objects
+}
+
+/// 重複ファイルのグループ
+#[derive(Debug)]
+pub struct DuplicateGroup {
+    /// 基準ファイル (最古のタイムスタンプ)
+    pub source: GitObjectInfo,
+    /// 重複ファイルのリスト (ハードリンクに置換する対象)
+    pub duplicates: Vec<GitObjectInfo>,
+}
+
+/// オブジェクトファイルを同一ハッシュでグループ化し、重複グループを返す
+///
+/// Args:
+///     objects: 探索で発見したオブジェクト情報のリスト
+///
+/// Returns:
+///     2つ以上のファイルが存在するグループのみ返す
+pub fn find_duplicates(objects: Vec<GitObjectInfo>) -> Vec<DuplicateGroup> {
+    // ハッシュ値でグループ化
+    let mut groups: HashMap<String, Vec<GitObjectInfo>> = HashMap::new();
+    for obj in objects {
+        groups.entry(obj.hash.clone()).or_default().push(obj);
+    }
+
+    // 2つ以上のファイルがあるグループのみ抽出
+    groups
+        .into_values()
+        .filter(|v| v.len() >= 2)
+        .map(|mut files| {
+            // タイムスタンプでソート (最古が先頭)
+            files.sort_by_key(|f| f.created);
+            let source = files.remove(0);
+            DuplicateGroup {
+                source,
+                duplicates: files,
+            }
+        })
+        .collect()
 }
 
 /// .git/objectsディレクトリ内のオブジェクトファイルを探索する
@@ -252,5 +292,73 @@ mod tests {
         let objects = scan_git_objects(temp_dir.path());
 
         assert_eq!(objects.len(), 2);
+    }
+
+    #[test]
+    fn test_find_duplicates_no_duplicates() {
+        let temp_dir = TempDir::new().unwrap();
+
+        // 異なるハッシュのファイルを作成
+        for (dir, file) in [
+            ("ab", "cdef1234567890abcdef1234567890abcdef12"),
+            ("cd", "ef12345678901234567890123456789012abcd"),
+        ] {
+            let obj_dir = temp_dir.path().join(".git/objects").join(dir);
+            fs::create_dir_all(&obj_dir).unwrap();
+            File::create(obj_dir.join(file)).unwrap();
+        }
+
+        let objects = scan_git_objects(temp_dir.path());
+        let duplicates = find_duplicates(objects);
+
+        assert!(duplicates.is_empty());
+    }
+
+    #[test]
+    fn test_find_duplicates_with_duplicates() {
+        let temp_dir = TempDir::new().unwrap();
+
+        // 2つのリポジトリに同じハッシュのファイルを作成
+        for repo in ["repo1", "repo2"] {
+            let obj_dir = temp_dir.path().join(repo).join(".git/objects/ab");
+            fs::create_dir_all(&obj_dir).unwrap();
+            let file = obj_dir.join("cdef1234567890abcdef1234567890abcdef12");
+            File::create(&file).unwrap();
+            // タイムスタンプをずらすために少し待つ
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+
+        let objects = scan_git_objects(temp_dir.path());
+        let duplicates = find_duplicates(objects);
+
+        assert_eq!(duplicates.len(), 1);
+        assert_eq!(duplicates[0].duplicates.len(), 1);
+    }
+
+    #[test]
+    fn test_find_duplicates_oldest_is_source() {
+        let temp_dir = TempDir::new().unwrap();
+
+        // 3つのリポジトリに同じハッシュのファイルを作成
+        let mut paths = Vec::new();
+        for repo in ["repo1", "repo2", "repo3"] {
+            let obj_dir = temp_dir.path().join(repo).join(".git/objects/ab");
+            fs::create_dir_all(&obj_dir).unwrap();
+            let file = obj_dir.join("cdef1234567890abcdef1234567890abcdef12");
+            File::create(&file).unwrap();
+            paths.push(file);
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+
+        let objects = scan_git_objects(temp_dir.path());
+        let duplicates = find_duplicates(objects);
+
+        assert_eq!(duplicates.len(), 1);
+        // 最古のファイルがsourceになっているか確認
+        assert_eq!(duplicates[0].duplicates.len(), 2);
+        // sourceは最も古いタイムスタンプを持つ
+        for dup in &duplicates[0].duplicates {
+            assert!(duplicates[0].source.created <= dup.created);
+        }
     }
 }
