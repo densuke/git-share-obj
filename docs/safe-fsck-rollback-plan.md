@@ -8,6 +8,7 @@ This memo captures implementation guidance for adding safety-first behavior to `
 - Add pre/post validation with `git fsck` by default.
 - Add rollback-friendly hardlink replacement flow.
 - Add a standalone `fsck-only` mode independent of hardlink processing.
+- Add repository-level lock coordination (lock file + OS advisory lock).
 - Keep implementation simple and composable (UNIX philosophy).
 
 ## Branch Policy
@@ -38,6 +39,9 @@ This memo captures implementation guidance for adding safety-first behavior to `
     - Long option only.
     - Detect repositories and run `git fsck` only.
     - No hardlink replacement in this mode.
+  - `--no-lock`
+    - Long option only.
+    - Skip repository lock acquisition for speed/compatibility (unsafe opt-out).
 
 ## Processing Model
 
@@ -49,16 +53,32 @@ This memo captures implementation guidance for adding safety-first behavior to `
 ### Normal mode (default)
 
 1. Detect repos.
-2. Run pre-fsck (unless `--no-fsck`).
-3. If pre-fsck has failures, abort replacement.
-4. Run duplicate scan + hardlink replacement.
-5. Run post-fsck (unless `--no-fsck`).
+2. Acquire repo locks (unless `--no-lock`).
+3. Run pre-fsck (unless `--no-fsck`).
+4. If pre-fsck has failures, abort replacement.
+5. Run duplicate scan + hardlink replacement.
+6. Run post-fsck (unless `--no-fsck`).
 
 ### Fsck-only mode
 
 1. Detect repos.
-2. Run `git fsck` for each repo.
-3. Report summary and exit.
+2. Acquire repo locks (unless `--no-lock`).
+3. Run `git fsck` for each repo.
+4. Report summary and exit.
+
+## Locking Model (Minimum)
+
+- Lock target per repository:
+  - lock file path: `.git/objects/git-share-obj.lock`
+- Two-layer lock:
+  1. lock file created/held by this process
+  2. OS advisory lock on the lock-file descriptor (`flock`)
+- Platform:
+  - UNIX only (Linux/macOS expected runtime)
+- Failure policy:
+  - lock acquisition failure is reported
+  - failed repos are skipped from destructive processing
+  - summary includes lock-failed count
 
 ## Hardlink Safety Logic
 
@@ -81,12 +101,17 @@ With rollback-capable sequence:
 - Rollback message on failure:
   - Must be printed regardless of `-v`.
   - Must indicate whether rollback succeeded or failed.
+- In `-v` mode:
+  - Print lock acquisition start/result per repository.
+- Lock failure:
+  - Must be printed regardless of `-v`.
 
 ## UNIX Philosophy Constraints
 
 - Keep modules small and focused.
   - `scanner`: discovery/grouping
   - `fsck`: command execution/result parsing
+  - `lock`: repo lock acquisition/release
   - `hardlink`: atomic replacement + rollback
   - `main`: orchestration only
 - Prefer simple, explicit control flow over complex abstractions.
@@ -97,6 +122,7 @@ With rollback-capable sequence:
 - CLI parsing:
   - `--no-fsck`
   - `--fsck-only`
+  - `--no-lock`
 - Repo detection:
   - Unique repo extraction from scanned paths
 - Fsck runner:
@@ -107,13 +133,16 @@ With rollback-capable sequence:
 - Main flow:
   - fsck-only does not perform replacement
   - no-fsck skips pre/post fsck
+  - no-lock skips lock acquisition
   - default runs pre/post fsck
+  - default acquires repo locks
 
 ## Acceptance Criteria
 
 - Safe mode (with fsck) is default.
 - `--no-fsck` is the only bypass path for fsck checks.
 - `--fsck-only` can be run independently from hardlink processing.
+- lock acquisition is enabled by default and bypassed only by `--no-lock`.
 - Replacement failure no longer silently loses target file.
 - Verbose fsck announcements exist.
 - Rollback failure/success messages are always visible.
