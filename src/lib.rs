@@ -1,8 +1,9 @@
 //! Gitオブジェクトの重複ファイルをハードリンクで共有するライブラリ
 
 pub mod cli;
-pub mod scanner;
 pub mod hardlink;
+pub mod i18n;
+pub mod scanner;
 
 #[cfg(test)]
 mod tests {
