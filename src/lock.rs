@@ -96,4 +96,19 @@ mod tests {
         let lock2 = try_lock_repo(&repo);
         assert!(matches!(lock2, Err(LockError::LockBusy(_))));
     }
+
+    #[test]
+    fn test_try_lock_repo_can_reacquire_after_drop() {
+        let temp_dir = TempDir::new().unwrap();
+        let repo = temp_dir.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        init_repo(&repo);
+
+        {
+            let _lock = try_lock_repo(&repo).unwrap();
+        }
+
+        let lock2 = try_lock_repo(&repo);
+        assert!(lock2.is_ok());
+    }
 }

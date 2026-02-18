@@ -287,6 +287,7 @@ mod tests {
     use super::*;
     use std::fs::{self, File};
     use std::io::Write;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use tempfile::TempDir;
 
     /// テスト用の.git/objects構造を作成する
@@ -652,6 +653,46 @@ mod tests {
         assert_eq!(repos.len(), 2);
         assert!(repos.contains(&repo1));
         assert!(repos.contains(&repo2));
+    }
+
+    #[test]
+    fn test_find_git_repositories_with_progress_callback_invoked() {
+        let temp_dir = TempDir::new().unwrap();
+        let repo = temp_dir.path().join("repo1");
+        fs::create_dir_all(repo.join(".git/objects/ab")).unwrap();
+        File::create(repo.join(".git/objects/ab/cdef1234567890abcdef1234567890abcdef12")).unwrap();
+
+        for i in 0..PROGRESS_INTERVAL {
+            fs::create_dir_all(temp_dir.path().join(format!("noise/dir-{}", i))).unwrap();
+        }
+
+        let calls = AtomicUsize::new(0);
+        let repos = find_git_repositories_with_progress(temp_dir.path(), |_p| {
+            calls.fetch_add(1, Ordering::Relaxed);
+        });
+
+        assert!(!repos.is_empty());
+        assert!(calls.load(Ordering::Relaxed) >= 1);
+    }
+
+    #[test]
+    fn test_scan_git_objects_with_progress_callback_invoked() {
+        let temp_dir = TempDir::new().unwrap();
+        let repo = temp_dir.path().join("repo1");
+        fs::create_dir_all(repo.join(".git/objects/ab")).unwrap();
+        File::create(repo.join(".git/objects/ab/cdef1234567890abcdef1234567890abcdef12")).unwrap();
+
+        for i in 0..PROGRESS_INTERVAL {
+            fs::create_dir_all(temp_dir.path().join(format!("noise2/dir-{}", i))).unwrap();
+        }
+
+        let calls = AtomicUsize::new(0);
+        let objects = scan_git_objects_with_progress(temp_dir.path(), |_p| {
+            calls.fetch_add(1, Ordering::Relaxed);
+        });
+
+        assert_eq!(objects.len(), 1);
+        assert!(calls.load(Ordering::Relaxed) >= 1);
     }
 }
 const PROGRESS_INTERVAL: usize = 1000;
