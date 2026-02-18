@@ -7,9 +7,9 @@ use clap::Parser;
 #[command(name = "git-share-obj")]
 #[command(version, about, long_about = None)]
 pub struct Args {
-    /// 探索対象のディレクトリ (デフォルト: カレントディレクトリ)
-    #[arg(default_value = ".")]
-    pub path: String,
+    /// 探索対象のディレクトリ (複数指定可能、デフォルト: カレントディレクトリ)
+    #[arg(default_values_t = vec![String::from(".")])]
+    pub paths: Vec<String>,
 
     /// ドライラン (実際には変更せず、検出結果のみ表示)
     #[arg(short = 'n', long = "dry-run")]
@@ -34,7 +34,7 @@ mod tests {
     #[test]
     fn test_default_args() {
         let args = Args::parse_from(["git-share-obj"]);
-        assert_eq!(args.path, ".");
+        assert_eq!(args.paths, vec!["."]);
         assert!(!args.dry_run);
         assert!(!args.verbose);
     }
@@ -64,16 +64,30 @@ mod tests {
     }
 
     #[test]
-    fn test_custom_path() {
+    fn test_single_path() {
         let args = Args::parse_from(["git-share-obj", "/path/to/dir"]);
-        assert_eq!(args.path, "/path/to/dir");
+        assert_eq!(args.paths, vec!["/path/to/dir"]);
     }
 
     #[test]
-    fn test_all_options() {
+    fn test_multiple_paths() {
+        let args = Args::parse_from(["git-share-obj", "/path/a", "/path/b", "/path/c"]);
+        assert_eq!(args.paths, vec!["/path/a", "/path/b", "/path/c"]);
+    }
+
+    #[test]
+    fn test_all_options_single_path() {
         let args = Args::parse_from(["git-share-obj", "-n", "-v", "/custom/path"]);
         assert!(args.dry_run);
         assert!(args.verbose);
-        assert_eq!(args.path, "/custom/path");
+        assert_eq!(args.paths, vec!["/custom/path"]);
+    }
+
+    #[test]
+    fn test_all_options_multiple_paths() {
+        let args = Args::parse_from(["git-share-obj", "-n", "-v", "/path/a", "/path/b"]);
+        assert!(args.dry_run);
+        assert!(args.verbose);
+        assert_eq!(args.paths, vec!["/path/a", "/path/b"]);
     }
 }

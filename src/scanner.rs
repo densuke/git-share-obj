@@ -108,6 +108,24 @@ pub struct DuplicateGroup {
     pub duplicates: Vec<GitObjectInfo>,
 }
 
+/// オブジェクトファイルをデバイスIDでグループ化する
+///
+/// 異なるデバイス上のファイルはハードリンクできないため、
+/// デバイスごとに分けて処理する必要がある。
+///
+/// Args:
+///     objects: 探索で発見したオブジェクト情報のリスト
+///
+/// Returns:
+///     デバイスIDをキーとしたHashMap
+pub fn group_by_device(objects: Vec<GitObjectInfo>) -> HashMap<u64, Vec<GitObjectInfo>> {
+    let mut groups: HashMap<u64, Vec<GitObjectInfo>> = HashMap::new();
+    for obj in objects {
+        groups.entry(obj.device).or_default().push(obj);
+    }
+    groups
+}
+
 /// オブジェクトファイルを同一ハッシュでグループ化し、重複グループを返す
 ///
 /// 既存のハードリンクグループがある場合は、そのグループを優先してsourceとする。
@@ -524,5 +542,33 @@ mod tests {
             "sourceは既存ハードリンクグループから選ばれるべき: {}",
             source_path
         );
+    }
+
+    #[test]
+    fn test_group_by_device_single_device() {
+        let temp_dir = TempDir::new().unwrap();
+
+        // 同じデバイス上に複数のリポジトリを作成
+        for repo in ["repo1", "repo2", "repo3"] {
+            let obj_dir = temp_dir.path().join(repo).join(".git/objects/ab");
+            fs::create_dir_all(&obj_dir).unwrap();
+            File::create(obj_dir.join("cdef1234567890abcdef1234567890abcdef12")).unwrap();
+        }
+
+        let objects = scan_git_objects(temp_dir.path());
+        let device_groups = group_by_device(objects);
+
+        // 全て同じデバイス上なので1グループ
+        assert_eq!(device_groups.len(), 1);
+        // 3ファイル全て同じグループ
+        let first_group: Vec<_> = device_groups.into_values().next().unwrap();
+        assert_eq!(first_group.len(), 3);
+    }
+
+    #[test]
+    fn test_group_by_device_empty() {
+        let objects: Vec<GitObjectInfo> = vec![];
+        let device_groups = group_by_device(objects);
+        assert!(device_groups.is_empty());
     }
 }

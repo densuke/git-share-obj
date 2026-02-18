@@ -3,7 +3,7 @@ use std::path::Path;
 use git_share_obj::cli::Args;
 use git_share_obj::hardlink::{replace_with_hardlink, ReplaceResult};
 use git_share_obj::i18n::{format_size, msg, Msg};
-use git_share_obj::scanner::{find_duplicates, scan_git_objects};
+use git_share_obj::scanner::{find_duplicates, group_by_device, scan_git_objects};
 
 /// 処理統計
 struct Stats {
@@ -30,92 +30,115 @@ impl Stats {
 
 fn main() {
     let args = Args::parse_args();
-    let path = Path::new(&args.path);
 
-    if !path.exists() {
-        eprintln!("Error: {} does not exist", args.path);
-        std::process::exit(1);
+    // 全てのパスが存在するか確認
+    for path_str in &args.paths {
+        let path = Path::new(path_str);
+        if !path.exists() {
+            eprintln!("Error: {} does not exist", path_str);
+            std::process::exit(1);
+        }
     }
 
     if args.verbose {
         println!("{}", msg(Msg::Scanning));
     }
 
-    // オブジェクトファイルを探索
-    let objects = scan_git_objects(path);
-
-    if args.verbose {
-        println!("{}: {}", msg(Msg::FoundObjects), objects.len());
+    // 全てのパスからオブジェクトファイルを収集
+    let mut all_objects = Vec::new();
+    for path_str in &args.paths {
+        let path = Path::new(path_str);
+        let objects = scan_git_objects(path);
+        all_objects.extend(objects);
     }
 
-    // 重複を検出
-    let duplicates = find_duplicates(objects);
-
     if args.verbose {
-        println!("{}: {}", msg(Msg::FoundDuplicateGroups), duplicates.len());
+        println!("{}: {}", msg(Msg::FoundObjects), all_objects.len());
     }
 
-    // 重複がなければ終了
-    if duplicates.is_empty() {
-        if args.verbose {
-            println!("{}: 0", msg(Msg::DuplicateFiles));
-        }
-        return;
+    // デバイスIDでグループ化
+    let device_groups = group_by_device(all_objects);
+    let device_count = device_groups.len();
+
+    if args.verbose && device_count > 1 {
+        println!("{}: {}", msg(Msg::DeviceGroups), device_count);
     }
 
     let mut stats = Stats::new();
 
-    // 各重複グループを処理
-    for group in &duplicates {
-        let dup_count = group.duplicates.len();
-        stats.total_duplicates += dup_count;
+    // 各デバイスグループごとに処理
+    for (device_id, objects) in device_groups {
+        if args.verbose && device_count > 1 {
+            println!("\n{}: {}", msg(Msg::ProcessingDevice), device_id);
+        }
 
-        // グループの削減容量を計算 (重複ファイル数 × ファイルサイズ)
-        let group_savings = group.source.size * dup_count as u64;
-        stats.total_savings += group_savings;
+        // 重複を検出
+        let duplicates = find_duplicates(objects);
 
-        if args.dry_run {
-            // ドライランモード: 検出結果と削減容量を表示
+        if args.verbose {
+            println!("{}: {}", msg(Msg::FoundDuplicateGroups), duplicates.len());
+        }
+
+        // 重複がなければ次のデバイスグループへ
+        if duplicates.is_empty() {
             if args.verbose {
-                println!(
-                    "\n{}: {} ({}: {})",
-                    msg(Msg::DuplicateFiles),
-                    dup_count + 1,
-                    msg(Msg::GroupSavings),
-                    format_size(group_savings)
-                );
-                println!("  [source] {} ({})", group.source.path.display(), format_size(group.source.size));
-                for dup in &group.duplicates {
-                    println!("  [dup]    {}", dup.path.display());
-                }
+                println!("{}: 0", msg(Msg::DuplicateFiles));
             }
-        } else {
-            // 実行モード: ハードリンクに置換
-            for dup in &group.duplicates {
-                let result = replace_with_hardlink(&group.source.path, &dup.path);
+            continue;
+        }
 
-                match &result {
-                    ReplaceResult::Replaced => {
-                        stats.replaced += 1;
-                        if args.verbose {
-                            println!("{}: {}", msg(Msg::Replaced), dup.path.display());
+        // 各重複グループを処理
+        for group in &duplicates {
+            let dup_count = group.duplicates.len();
+            stats.total_duplicates += dup_count;
+
+            // グループの削減容量を計算 (重複ファイル数 × ファイルサイズ)
+            let group_savings = group.source.size * dup_count as u64;
+            stats.total_savings += group_savings;
+
+            if args.dry_run {
+                // ドライランモード: 検出結果と削減容量を表示
+                if args.verbose {
+                    println!(
+                        "\n{}: {} ({}: {})",
+                        msg(Msg::DuplicateFiles),
+                        dup_count + 1,
+                        msg(Msg::GroupSavings),
+                        format_size(group_savings)
+                    );
+                    println!("  [source] {} ({})", group.source.path.display(), format_size(group.source.size));
+                    for dup in &group.duplicates {
+                        println!("  [dup]    {}", dup.path.display());
+                    }
+                }
+            } else {
+                // 実行モード: ハードリンクに置換
+                for dup in &group.duplicates {
+                    let result = replace_with_hardlink(&group.source.path, &dup.path);
+
+                    match &result {
+                        ReplaceResult::Replaced => {
+                            stats.replaced += 1;
+                            if args.verbose {
+                                println!("{}: {}", msg(Msg::Replaced), dup.path.display());
+                            }
                         }
-                    }
-                    ReplaceResult::AlreadyLinked => {
-                        stats.already_linked += 1;
-                        if args.verbose {
-                            println!("{}: {}", msg(Msg::AlreadyLinked), dup.path.display());
+                        ReplaceResult::AlreadyLinked => {
+                            stats.already_linked += 1;
+                            if args.verbose {
+                                println!("{}: {}", msg(Msg::AlreadyLinked), dup.path.display());
+                            }
                         }
-                    }
-                    ReplaceResult::CrossFilesystem => {
-                        stats.cross_filesystem += 1;
-                        // FS跨ぎは通常モードでも出力
-                        println!("{}: {}", msg(Msg::CrossFilesystem), dup.path.display());
-                    }
-                    ReplaceResult::Error(e) => {
-                        stats.errors += 1;
-                        // エラーは常に出力
-                        eprintln!("{}: {} - {}", msg(Msg::ErrorOccurred), dup.path.display(), e);
+                        ReplaceResult::CrossFilesystem => {
+                            stats.cross_filesystem += 1;
+                            // FS跨ぎは通常モードでも出力
+                            println!("{}: {}", msg(Msg::CrossFilesystem), dup.path.display());
+                        }
+                        ReplaceResult::Error(e) => {
+                            stats.errors += 1;
+                            // エラーは常に出力
+                            eprintln!("{}: {} - {}", msg(Msg::ErrorOccurred), dup.path.display(), e);
+                        }
                     }
                 }
             }

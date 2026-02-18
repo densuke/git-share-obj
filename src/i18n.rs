@@ -37,7 +37,7 @@ pub fn format_size(bytes: u64) -> String {
 pub enum Msg {
     // ヘルプ関連
     AppDescription,
-    ArgPath,
+    ArgPaths,
     ArgDryRun,
     ArgVerbose,
 
@@ -47,6 +47,8 @@ pub enum Msg {
     FoundDuplicateGroups,
     DuplicateFiles,
     Processing,
+    ProcessingDevice,
+    DeviceGroups,
 
     // 結果メッセージ
     Replaced,
@@ -81,7 +83,7 @@ fn msg_ja(key: Msg) -> &'static str {
     match key {
         // ヘルプ関連
         Msg::AppDescription => "Gitオブジェクトの重複ファイルをハードリンクで共有するツール",
-        Msg::ArgPath => "探索対象のディレクトリ (デフォルト: カレントディレクトリ)",
+        Msg::ArgPaths => "探索対象のディレクトリ (複数指定可能、デフォルト: カレントディレクトリ)",
         Msg::ArgDryRun => "ドライラン (実際には変更せず、検出結果のみ表示)",
         Msg::ArgVerbose => "詳細出力",
 
@@ -91,6 +93,8 @@ fn msg_ja(key: Msg) -> &'static str {
         Msg::FoundDuplicateGroups => "重複グループ発見",
         Msg::DuplicateFiles => "重複ファイル",
         Msg::Processing => "処理中...",
+        Msg::ProcessingDevice => "デバイス処理中",
+        Msg::DeviceGroups => "デバイスグループ",
 
         // 結果メッセージ
         Msg::Replaced => "置換完了",
@@ -117,7 +121,7 @@ fn msg_en(key: Msg) -> &'static str {
     match key {
         // Help
         Msg::AppDescription => "Share duplicate Git objects using hard links",
-        Msg::ArgPath => "Target directory (default: current directory)",
+        Msg::ArgPaths => "Target directories (multiple allowed, default: current directory)",
         Msg::ArgDryRun => "Dry run (only show results without making changes)",
         Msg::ArgVerbose => "Verbose output",
 
@@ -127,6 +131,8 @@ fn msg_en(key: Msg) -> &'static str {
         Msg::FoundDuplicateGroups => "duplicate groups found",
         Msg::DuplicateFiles => "duplicate files",
         Msg::Processing => "Processing...",
+        Msg::ProcessingDevice => "Processing device",
+        Msg::DeviceGroups => "device groups",
 
         // Results
         Msg::Replaced => "Replaced",
@@ -165,7 +171,7 @@ mod tests {
         // 全てのキーに対応する翻訳があることを確認
         let keys = [
             Msg::AppDescription,
-            Msg::ArgPath,
+            Msg::ArgPaths,
             Msg::ArgDryRun,
             Msg::ArgVerbose,
             Msg::Scanning,
@@ -173,6 +179,8 @@ mod tests {
             Msg::FoundDuplicateGroups,
             Msg::DuplicateFiles,
             Msg::Processing,
+            Msg::ProcessingDevice,
+            Msg::DeviceGroups,
             Msg::Replaced,
             Msg::AlreadyLinked,
             Msg::CrossFilesystem,
