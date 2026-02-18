@@ -5,7 +5,9 @@ use git_share_obj::cli::Args;
 use git_share_obj::fsck::run_git_fsck;
 use git_share_obj::hardlink::{replace_with_hardlink, ReplaceResult};
 use git_share_obj::i18n::{format_size, msg, Msg};
-use git_share_obj::scanner::{find_duplicates, find_git_repositories, group_by_device, scan_git_objects};
+use git_share_obj::scanner::{
+    find_duplicates, find_git_repositories_with_progress, group_by_device, scan_git_objects_with_progress,
+};
 
 /// 処理統計
 struct Stats {
@@ -30,11 +32,18 @@ impl Stats {
     }
 }
 
-fn collect_repositories(paths: &[String]) -> Vec<PathBuf> {
+fn collect_repositories(paths: &[String], verbose: bool) -> Vec<PathBuf> {
     let mut repos = HashSet::new();
     for path_str in paths {
         let path = Path::new(path_str);
-        for repo in find_git_repositories(path) {
+        if verbose {
+            println!("{}: {}", msg(Msg::ScanningPath), path.display());
+        }
+        for repo in find_git_repositories_with_progress(path, |current| {
+            if verbose {
+                println!("{}: {}", msg(Msg::CheckingDirectory), current.display());
+            }
+        }) {
             repos.insert(repo);
         }
     }
@@ -89,7 +98,7 @@ fn main() {
         }
     }
 
-    let repos = collect_repositories(&args.paths);
+    let repos = collect_repositories(&args.paths, args.verbose);
 
     if args.fsck_only {
         let ok = run_fsck_checks(&repos, args.verbose);
@@ -121,7 +130,14 @@ fn main() {
     let mut all_objects = Vec::new();
     for path_str in &args.paths {
         let path = Path::new(path_str);
-        let objects = scan_git_objects(path);
+        if args.verbose {
+            println!("{}: {}", msg(Msg::ScanningPath), path.display());
+        }
+        let objects = scan_git_objects_with_progress(path, |current| {
+            if args.verbose {
+                println!("{}: {}", msg(Msg::CheckingDirectory), current.display());
+            }
+        });
         all_objects.extend(objects);
     }
 

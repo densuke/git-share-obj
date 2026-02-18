@@ -82,14 +82,27 @@ impl GitObjectInfo {
 /// Returns:
 ///     発見した全てのGitオブジェクト情報のベクタ
 pub fn scan_git_objects(base_path: &Path) -> Vec<GitObjectInfo> {
+    scan_git_objects_with_progress(base_path, |_| {})
+}
+
+/// 指定ディレクトリ以下の全ての.git/objectsを探索する（進捗通知付き）
+pub fn scan_git_objects_with_progress<F>(base_path: &Path, mut on_progress: F) -> Vec<GitObjectInfo>
+where
+    F: FnMut(&Path),
+{
     let mut objects = Vec::new();
+    let mut scanned_entries = 0usize;
 
     // base_path以下の全ての.gitディレクトリを探索
     for entry in WalkDir::new(base_path)
         .into_iter()
         .filter_map(|e| e.ok())
     {
+        scanned_entries += 1;
         let path = entry.path();
+        if scanned_entries % PROGRESS_INTERVAL == 0 {
+            on_progress(path);
+        }
 
         // .git/objectsディレクトリを発見したら、その中を探索
         if path.ends_with(".git/objects") && path.is_dir() {
@@ -105,10 +118,23 @@ pub fn scan_git_objects(base_path: &Path) -> Vec<GitObjectInfo> {
 /// `.git/objects` が存在するディレクトリをGitリポジトリとして扱い、
 /// リポジトリルート（`.git` の親ディレクトリ）を重複なく返す。
 pub fn find_git_repositories(base_path: &Path) -> Vec<PathBuf> {
+    find_git_repositories_with_progress(base_path, |_| {})
+}
+
+/// 指定ディレクトリ以下のGitリポジトリルートを列挙する（進捗通知付き）
+pub fn find_git_repositories_with_progress<F>(base_path: &Path, mut on_progress: F) -> Vec<PathBuf>
+where
+    F: FnMut(&Path),
+{
     let mut repos = HashSet::new();
+    let mut scanned_entries = 0usize;
 
     for entry in WalkDir::new(base_path).into_iter().filter_map(|e| e.ok()) {
+        scanned_entries += 1;
         let path = entry.path();
+        if scanned_entries % PROGRESS_INTERVAL == 0 {
+            on_progress(path);
+        }
         if path.ends_with(".git/objects") && path.is_dir() {
             if let Some(git_dir) = path.parent() {
                 if let Some(repo_root) = git_dir.parent() {
@@ -628,3 +654,4 @@ mod tests {
         assert!(repos.contains(&repo2));
     }
 }
+const PROGRESS_INTERVAL: usize = 1000;

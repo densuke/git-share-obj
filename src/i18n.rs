@@ -49,6 +49,8 @@ pub enum Msg {
     Processing,
     ProcessingDevice,
     DeviceGroups,
+    ScanningPath,
+    CheckingDirectory,
 
     // 結果メッセージ
     Replaced,
@@ -108,6 +110,8 @@ fn msg_ja(key: Msg) -> &'static str {
         Msg::Processing => "処理中...",
         Msg::ProcessingDevice => "デバイス処理中",
         Msg::DeviceGroups => "デバイスグループ",
+        Msg::ScanningPath => "探索ルート",
+        Msg::CheckingDirectory => "確認中ディレクトリ",
 
         // 結果メッセージ
         Msg::Replaced => "置換完了",
@@ -159,6 +163,8 @@ fn msg_en(key: Msg) -> &'static str {
         Msg::Processing => "Processing...",
         Msg::ProcessingDevice => "Processing device",
         Msg::DeviceGroups => "device groups",
+        Msg::ScanningPath => "Scanning root",
+        Msg::CheckingDirectory => "Checking directory",
 
         // Results
         Msg::Replaced => "Replaced",
@@ -220,6 +226,8 @@ mod tests {
             Msg::Processing,
             Msg::ProcessingDevice,
             Msg::DeviceGroups,
+            Msg::ScanningPath,
+            Msg::CheckingDirectory,
             Msg::Replaced,
             Msg::AlreadyLinked,
             Msg::CrossFilesystem,
