@@ -45,6 +45,22 @@
 
 ## 使用方法
 
+## インストール
+
+### GitHub からインストール
+
+```bash
+cargo install --git https://github.com/densuke/git-share-obj.git
+```
+
+### ローカルソースからインストール
+
+```bash
+cargo install --path .
+```
+
+インストール後は `git-share-obj --help` で動作確認できます。
+
 ### ドライラン（推奨）
 
 ```bash
