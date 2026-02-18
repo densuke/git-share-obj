@@ -1,0 +1,15 @@
+[package]
+name = "git-share-obj"
+version = "0.1.0"
+edition = "2021"
+description = "Gitオブジェクトの重複ファイルをハードリンクで共有するツール"
+license = "MIT"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+walkdir = "2"
+sys-locale = "0.3"
+anyhow = "1"
+
+[dev-dependencies]
+tempfile = "3"
