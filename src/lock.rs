@@ -1,6 +1,7 @@
 //! リポジトリロック処理（lock file + OS advisory lock）
 
 use std::fs::{self, File, OpenOptions};
+use std::fmt;
 use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 
@@ -10,6 +11,16 @@ pub enum LockError {
     LockPathCreateFailed(String),
     LockFileOpenFailed(String),
     LockBusy(String),
+}
+
+impl fmt::Display for LockError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LockError::LockPathCreateFailed(e) => write!(f, "lock path create failed: {}", e),
+            LockError::LockFileOpenFailed(e) => write!(f, "lock file open failed: {}", e),
+            LockError::LockBusy(path) => write!(f, "lock busy: {}", path),
+        }
+    }
 }
 
 /// 獲得済みロック
@@ -43,6 +54,7 @@ pub fn try_lock_repo(repo: &Path) -> Result<RepoLock, LockError> {
         .read(true)
         .write(true)
         .create(true)
+        .truncate(false)
         .open(&lock_path)
         .map_err(|e| LockError::LockFileOpenFailed(e.to_string()))?;
 

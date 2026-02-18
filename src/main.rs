@@ -54,6 +54,33 @@ fn collect_repositories(paths: &[String], verbose: bool) -> Vec<PathBuf> {
     repo_list
 }
 
+fn validate_paths(paths: &[String]) {
+    for path_str in paths {
+        let path = Path::new(path_str);
+        if !path.exists() {
+            eprintln!("Error: {} does not exist", path_str);
+            std::process::exit(1);
+        }
+    }
+}
+
+fn collect_all_objects(paths: &[String], verbose: bool) -> Vec<git_share_obj::scanner::GitObjectInfo> {
+    let mut all_objects = Vec::new();
+    for path_str in paths {
+        let path = Path::new(path_str);
+        if verbose {
+            println!("{}: {}", msg(Msg::ScanningPath), path.display());
+        }
+        let objects = scan_git_objects_with_progress(path, |current| {
+            if verbose {
+                println!("{}: {}", msg(Msg::CheckingDirectory), current.display());
+            }
+        });
+        all_objects.extend(objects);
+    }
+    all_objects
+}
+
 fn run_fsck_checks(repos: &[PathBuf], verbose: bool) -> bool {
     let mut failed = 0usize;
     for repo in repos {
@@ -107,7 +134,7 @@ fn acquire_repo_locks(repos: &[PathBuf], verbose: bool) -> (Vec<PathBuf>, Vec<Re
             }
             Err(e) => {
                 failed += 1;
-                eprintln!("{}: {} - {:?}", msg(Msg::LockFailed), repo.display(), e);
+                eprintln!("{}: {} - {}", msg(Msg::LockFailed), repo.display(), e);
             }
         }
     }
@@ -124,15 +151,7 @@ fn acquire_repo_locks(repos: &[PathBuf], verbose: bool) -> (Vec<PathBuf>, Vec<Re
 
 fn main() {
     let args = Args::parse_args();
-
-    // 全てのパスが存在するか確認
-    for path_str in &args.paths {
-        let path = Path::new(path_str);
-        if !path.exists() {
-            eprintln!("Error: {} does not exist", path_str);
-            std::process::exit(1);
-        }
-    }
+    validate_paths(&args.paths);
 
     let repos = collect_repositories(&args.paths, args.verbose);
     let (processing_repos, _locks) = if args.no_lock {
@@ -171,19 +190,7 @@ fn main() {
     }
 
     // 全てのパスからオブジェクトファイルを収集
-    let mut all_objects = Vec::new();
-    for path_str in &args.paths {
-        let path = Path::new(path_str);
-        if args.verbose {
-            println!("{}: {}", msg(Msg::ScanningPath), path.display());
-        }
-        let objects = scan_git_objects_with_progress(path, |current| {
-            if args.verbose {
-                println!("{}: {}", msg(Msg::CheckingDirectory), current.display());
-            }
-        });
-        all_objects.extend(objects);
-    }
+    let all_objects = collect_all_objects(&args.paths, args.verbose);
 
     if args.verbose {
         println!("{}: {}", msg(Msg::FoundObjects), all_objects.len());

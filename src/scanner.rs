@@ -10,6 +10,8 @@ use walkdir::WalkDir;
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
 
+const PROGRESS_INTERVAL: usize = 1000;
+
 /// Gitオブジェクトファイルの情報
 #[derive(Debug, Clone)]
 pub struct GitObjectInfo {
@@ -100,7 +102,7 @@ where
     {
         scanned_entries += 1;
         let path = entry.path();
-        if scanned_entries % PROGRESS_INTERVAL == 0 {
+        if scanned_entries.is_multiple_of(PROGRESS_INTERVAL) {
             on_progress(path);
         }
 
@@ -132,7 +134,7 @@ where
     for entry in WalkDir::new(base_path).into_iter().filter_map(|e| e.ok()) {
         scanned_entries += 1;
         let path = entry.path();
-        if scanned_entries % PROGRESS_INTERVAL == 0 {
+        if scanned_entries.is_multiple_of(PROGRESS_INTERVAL) {
             on_progress(path);
         }
         if path.ends_with(".git/objects") && path.is_dir() {
@@ -197,7 +199,7 @@ pub fn find_duplicates(objects: Vec<GitObjectInfo>) -> Vec<DuplicateGroup> {
     groups
         .into_values()
         .filter(|v| v.len() >= 2)
-        .filter_map(|files| select_source_and_duplicates(files))
+        .filter_map(select_source_and_duplicates)
         .collect()
 }
 
@@ -695,4 +697,3 @@ mod tests {
         assert!(calls.load(Ordering::Relaxed) >= 1);
     }
 }
-const PROGRESS_INTERVAL: usize = 1000;
