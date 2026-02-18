@@ -68,6 +68,19 @@ pub enum Msg {
     GroupSavings,
     EstimatedSavings,
     TotalSavings,
+
+    // fsck
+    FsckRunning,
+    FsckOk,
+    FsckFailed,
+    FsckSummary,
+    FsckOnlyComplete,
+    FsckSkipped,
+    AbortOnFsckFailure,
+
+    // rollback
+    RollbackOccurred,
+    RollbackFailed,
 }
 
 /// ローカライズされたメッセージを取得する
@@ -114,6 +127,19 @@ fn msg_ja(key: Msg) -> &'static str {
         Msg::GroupSavings => "グループ削減容量",
         Msg::EstimatedSavings => "見込み削減容量",
         Msg::TotalSavings => "合計削減容量",
+
+        // fsck
+        Msg::FsckRunning => "fsck実行中",
+        Msg::FsckOk => "fsck成功",
+        Msg::FsckFailed => "fsck失敗",
+        Msg::FsckSummary => "fsck集計",
+        Msg::FsckOnlyComplete => "=== fsckのみ完了 ===",
+        Msg::FsckSkipped => "fsckスキップ (--no-fsck)",
+        Msg::AbortOnFsckFailure => "fsck失敗のため置換処理を中止",
+
+        // rollback
+        Msg::RollbackOccurred => "ロールバック",
+        Msg::RollbackFailed => "ロールバック失敗",
     }
 }
 
@@ -152,6 +178,19 @@ fn msg_en(key: Msg) -> &'static str {
         Msg::GroupSavings => "Group savings",
         Msg::EstimatedSavings => "Estimated savings",
         Msg::TotalSavings => "Total savings",
+
+        // fsck
+        Msg::FsckRunning => "Running fsck",
+        Msg::FsckOk => "fsck ok",
+        Msg::FsckFailed => "fsck failed",
+        Msg::FsckSummary => "fsck summary",
+        Msg::FsckOnlyComplete => "=== fsck-only complete ===",
+        Msg::FsckSkipped => "fsck skipped (--no-fsck)",
+        Msg::AbortOnFsckFailure => "Aborting replacement due to fsck failure",
+
+        // rollback
+        Msg::RollbackOccurred => "Rollback",
+        Msg::RollbackFailed => "Rollback failed",
     }
 }
 
@@ -194,6 +233,15 @@ mod tests {
             Msg::GroupSavings,
             Msg::EstimatedSavings,
             Msg::TotalSavings,
+            Msg::FsckRunning,
+            Msg::FsckOk,
+            Msg::FsckFailed,
+            Msg::FsckSummary,
+            Msg::FsckOnlyComplete,
+            Msg::FsckSkipped,
+            Msg::AbortOnFsckFailure,
+            Msg::RollbackOccurred,
+            Msg::RollbackFailed,
         ];
 
         for key in keys {

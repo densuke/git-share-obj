@@ -1,9 +1,11 @@
-use std::path::Path;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 
 use git_share_obj::cli::Args;
+use git_share_obj::fsck::run_git_fsck;
 use git_share_obj::hardlink::{replace_with_hardlink, ReplaceResult};
 use git_share_obj::i18n::{format_size, msg, Msg};
-use git_share_obj::scanner::{find_duplicates, group_by_device, scan_git_objects};
+use git_share_obj::scanner::{find_duplicates, find_git_repositories, group_by_device, scan_git_objects};
 
 /// 処理統計
 struct Stats {
@@ -28,6 +30,53 @@ impl Stats {
     }
 }
 
+fn collect_repositories(paths: &[String]) -> Vec<PathBuf> {
+    let mut repos = HashSet::new();
+    for path_str in paths {
+        let path = Path::new(path_str);
+        for repo in find_git_repositories(path) {
+            repos.insert(repo);
+        }
+    }
+
+    let mut repo_list: Vec<_> = repos.into_iter().collect();
+    repo_list.sort();
+    repo_list
+}
+
+fn run_fsck_checks(repos: &[PathBuf], verbose: bool) -> bool {
+    let mut failed = 0usize;
+    for repo in repos {
+        if verbose {
+            println!("{}: {}", msg(Msg::FsckRunning), repo.display());
+        }
+
+        let result = run_git_fsck(repo);
+        if result.success {
+            if verbose {
+                println!("{}: {}", msg(Msg::FsckOk), repo.display());
+            }
+        } else {
+            failed += 1;
+            let detail = if result.stderr.is_empty() {
+                format!("exit code: {:?}", result.code)
+            } else {
+                result.stderr
+            };
+            eprintln!("{}: {} - {}", msg(Msg::FsckFailed), repo.display(), detail);
+        }
+    }
+
+    println!(
+        "{}: {}/{} (failed: {})",
+        msg(Msg::FsckSummary),
+        repos.len().saturating_sub(failed),
+        repos.len(),
+        failed
+    );
+    failed == 0
+}
+
 fn main() {
     let args = Args::parse_args();
 
@@ -37,6 +86,30 @@ fn main() {
         if !path.exists() {
             eprintln!("Error: {} does not exist", path_str);
             std::process::exit(1);
+        }
+    }
+
+    let repos = collect_repositories(&args.paths);
+
+    if args.fsck_only {
+        let ok = run_fsck_checks(&repos, args.verbose);
+        println!();
+        println!("{}", msg(Msg::FsckOnlyComplete));
+        if !ok {
+            std::process::exit(2);
+        }
+        return;
+    }
+
+    if args.no_fsck {
+        if args.verbose {
+            println!("{}", msg(Msg::FsckSkipped));
+        }
+    } else {
+        let ok = run_fsck_checks(&repos, args.verbose);
+        if !ok {
+            eprintln!("{}", msg(Msg::AbortOnFsckFailure));
+            std::process::exit(2);
         }
     }
 
@@ -134,6 +207,16 @@ fn main() {
                             // FS跨ぎは通常モードでも出力
                             println!("{}: {}", msg(Msg::CrossFilesystem), dup.path.display());
                         }
+                        ReplaceResult::RolledBack(e) => {
+                            stats.errors += 1;
+                            // ロールバック実行は常に出力
+                            eprintln!("{}: {} - {}", msg(Msg::RollbackOccurred), dup.path.display(), e);
+                        }
+                        ReplaceResult::RollbackFailed(e) => {
+                            stats.errors += 1;
+                            // ロールバック失敗は常に出力
+                            eprintln!("{}: {} - {}", msg(Msg::RollbackFailed), dup.path.display(), e);
+                        }
                         ReplaceResult::Error(e) => {
                             stats.errors += 1;
                             // エラーは常に出力
@@ -161,5 +244,12 @@ fn main() {
             println!("  {}: {}", msg(Msg::TotalErrors), stats.errors);
         }
         println!("  {}: {}", msg(Msg::TotalSavings), format_size(stats.total_savings));
+    }
+
+    if !args.no_fsck && !args.dry_run {
+        let ok = run_fsck_checks(&repos, args.verbose);
+        if !ok {
+            std::process::exit(3);
+        }
     }
 }
