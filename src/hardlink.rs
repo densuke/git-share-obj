@@ -2,7 +2,7 @@
 
 use std::fs;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
@@ -16,6 +16,10 @@ pub enum ReplaceResult {
     AlreadyLinked,
     /// ファイルシステムが異なるためスキップ
     CrossFilesystem,
+    /// ハードリンク作成失敗後にロールバック成功
+    RolledBack(String),
+    /// ハードリンク作成失敗後のロールバックも失敗
+    RollbackFailed(String),
     /// エラー発生
     Error(String),
 }
@@ -84,16 +88,51 @@ pub fn replace_with_hardlink(source: &Path, target: &Path) -> ReplaceResult {
         Err(e) => return ReplaceResult::Error(e.to_string()),
     }
 
-    // 対象ファイルを削除してハードリンクを作成
-    if let Err(e) = fs::remove_file(target) {
-        return ReplaceResult::Error(format!("ファイル削除失敗: {}", e));
+    let backup = backup_path(target);
+    if let Err(e) = fs::rename(target, &backup) {
+        return ReplaceResult::Error(format!("退避リネーム失敗: {}", e));
     }
 
     if let Err(e) = fs::hard_link(source, target) {
-        return ReplaceResult::Error(format!("ハードリンク作成失敗: {}", e));
+        remove_if_regular_file(target);
+        return match fs::rename(&backup, target) {
+            Ok(()) => ReplaceResult::RolledBack(format!(
+                "ハードリンク作成失敗: {} (ロールバック成功)",
+                e
+            )),
+            Err(rollback_err) => ReplaceResult::RollbackFailed(format!(
+                "ハードリンク作成失敗: {} (ロールバック失敗: {})",
+                e, rollback_err
+            )),
+        };
+    }
+
+    if let Err(e) = fs::remove_file(&backup) {
+        return ReplaceResult::Error(format!(
+            "退避ファイル削除失敗: {} (退避ファイル: {})",
+            e,
+            backup.display()
+        ));
     }
 
     ReplaceResult::Replaced
+}
+
+fn backup_path(target: &Path) -> PathBuf {
+    let file_name = target
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "target".to_string());
+    target.with_file_name(format!("{}.git-share-obj.bak", file_name))
+}
+
+fn remove_if_regular_file(path: &Path) {
+    match fs::symlink_metadata(path) {
+        Ok(meta) if meta.is_file() => {
+            let _ = fs::remove_file(path);
+        }
+        _ => {}
+    }
 }
 
 #[cfg(test)]
@@ -150,6 +189,7 @@ mod tests {
 
         // ハードリンクが作成されたことを確認
         assert!(is_same_inode(&source, &target).unwrap());
+        assert!(!temp_dir.path().join("target.git-share-obj.bak").exists());
     }
 
     #[test]
@@ -176,4 +216,5 @@ mod tests {
         let result = replace_with_hardlink(&source, &target);
         assert!(matches!(result, ReplaceResult::Error(_)));
     }
+
 }
