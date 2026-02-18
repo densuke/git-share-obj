@@ -5,6 +5,7 @@ use git_share_obj::cli::Args;
 use git_share_obj::fsck::run_git_fsck;
 use git_share_obj::hardlink::{replace_with_hardlink, ReplaceResult};
 use git_share_obj::i18n::{format_size, msg, Msg};
+use git_share_obj::lock::{try_lock_repo, RepoLock};
 use git_share_obj::scanner::{
     find_duplicates, find_git_repositories_with_progress, group_by_device, scan_git_objects_with_progress,
 };
@@ -86,6 +87,41 @@ fn run_fsck_checks(repos: &[PathBuf], verbose: bool) -> bool {
     failed == 0
 }
 
+fn acquire_repo_locks(repos: &[PathBuf], verbose: bool) -> (Vec<PathBuf>, Vec<RepoLock>) {
+    let mut locked_repos = Vec::new();
+    let mut locks = Vec::new();
+    let mut failed = 0usize;
+
+    for repo in repos {
+        if verbose {
+            println!("{}: {}", msg(Msg::LockingRepo), repo.display());
+        }
+
+        match try_lock_repo(repo) {
+            Ok(lock) => {
+                if verbose {
+                    println!("{}: {}", msg(Msg::LockAcquired), repo.display());
+                }
+                locked_repos.push(repo.clone());
+                locks.push(lock);
+            }
+            Err(e) => {
+                failed += 1;
+                eprintln!("{}: {} - {:?}", msg(Msg::LockFailed), repo.display(), e);
+            }
+        }
+    }
+
+    println!(
+        "{}: {}/{} (failed: {})",
+        msg(Msg::LockSummary),
+        locked_repos.len(),
+        repos.len(),
+        failed
+    );
+    (locked_repos, locks)
+}
+
 fn main() {
     let args = Args::parse_args();
 
@@ -99,9 +135,17 @@ fn main() {
     }
 
     let repos = collect_repositories(&args.paths, args.verbose);
+    let (processing_repos, _locks) = if args.no_lock {
+        if args.verbose {
+            println!("{}", msg(Msg::LockSkipped));
+        }
+        (repos.clone(), Vec::new())
+    } else {
+        acquire_repo_locks(&repos, args.verbose)
+    };
 
     if args.fsck_only {
-        let ok = run_fsck_checks(&repos, args.verbose);
+        let ok = run_fsck_checks(&processing_repos, args.verbose);
         println!();
         println!("{}", msg(Msg::FsckOnlyComplete));
         if !ok {
@@ -115,7 +159,7 @@ fn main() {
             println!("{}", msg(Msg::FsckSkipped));
         }
     } else {
-        let ok = run_fsck_checks(&repos, args.verbose);
+        let ok = run_fsck_checks(&processing_repos, args.verbose);
         if !ok {
             eprintln!("{}", msg(Msg::AbortOnFsckFailure));
             std::process::exit(2);
@@ -263,7 +307,7 @@ fn main() {
     }
 
     if !args.no_fsck && !args.dry_run {
-        let ok = run_fsck_checks(&repos, args.verbose);
+        let ok = run_fsck_checks(&processing_repos, args.verbose);
         if !ok {
             std::process::exit(3);
         }

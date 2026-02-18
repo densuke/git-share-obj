@@ -80,6 +80,13 @@ pub enum Msg {
     FsckSkipped,
     AbortOnFsckFailure,
 
+    // lock
+    LockingRepo,
+    LockAcquired,
+    LockFailed,
+    LockSkipped,
+    LockSummary,
+
     // rollback
     RollbackOccurred,
     RollbackFailed,
@@ -141,6 +148,13 @@ fn msg_ja(key: Msg) -> &'static str {
         Msg::FsckSkipped => "fsckスキップ (--no-fsck)",
         Msg::AbortOnFsckFailure => "fsck失敗のため置換処理を中止",
 
+        // lock
+        Msg::LockingRepo => "ロック取得中",
+        Msg::LockAcquired => "ロック取得",
+        Msg::LockFailed => "ロック取得失敗",
+        Msg::LockSkipped => "ロック処理スキップ (--no-lock)",
+        Msg::LockSummary => "ロック集計",
+
         // rollback
         Msg::RollbackOccurred => "ロールバック",
         Msg::RollbackFailed => "ロールバック失敗",
@@ -193,6 +207,13 @@ fn msg_en(key: Msg) -> &'static str {
         Msg::FsckOnlyComplete => "=== fsck-only complete ===",
         Msg::FsckSkipped => "fsck skipped (--no-fsck)",
         Msg::AbortOnFsckFailure => "Aborting replacement due to fsck failure",
+
+        // lock
+        Msg::LockingRepo => "Acquiring lock",
+        Msg::LockAcquired => "Lock acquired",
+        Msg::LockFailed => "Lock failed",
+        Msg::LockSkipped => "Locking skipped (--no-lock)",
+        Msg::LockSummary => "lock summary",
 
         // rollback
         Msg::RollbackOccurred => "Rollback",
@@ -248,6 +269,11 @@ mod tests {
             Msg::FsckOnlyComplete,
             Msg::FsckSkipped,
             Msg::AbortOnFsckFailure,
+            Msg::LockingRepo,
+            Msg::LockAcquired,
+            Msg::LockFailed,
+            Msg::LockSkipped,
+            Msg::LockSummary,
             Msg::RollbackOccurred,
             Msg::RollbackFailed,
         ];
