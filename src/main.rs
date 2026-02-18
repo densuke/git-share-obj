@@ -2,7 +2,7 @@ use std::path::Path;
 
 use git_share_obj::cli::Args;
 use git_share_obj::hardlink::{replace_with_hardlink, ReplaceResult};
-use git_share_obj::i18n::{msg, Msg};
+use git_share_obj::i18n::{format_size, msg, Msg};
 use git_share_obj::scanner::{find_duplicates, scan_git_objects};
 
 /// 処理統計
@@ -12,6 +12,7 @@ struct Stats {
     already_linked: usize,
     cross_filesystem: usize,
     errors: usize,
+    total_savings: u64,
 }
 
 impl Stats {
@@ -22,6 +23,7 @@ impl Stats {
             already_linked: 0,
             cross_filesystem: 0,
             errors: 0,
+            total_savings: 0,
         }
     }
 }
@@ -65,17 +67,24 @@ fn main() {
 
     // 各重複グループを処理
     for group in &duplicates {
-        stats.total_duplicates += group.duplicates.len();
+        let dup_count = group.duplicates.len();
+        stats.total_duplicates += dup_count;
+
+        // グループの削減容量を計算 (重複ファイル数 × ファイルサイズ)
+        let group_savings = group.source.size * dup_count as u64;
+        stats.total_savings += group_savings;
 
         if args.dry_run {
-            // ドライランモード: 検出結果を表示
+            // ドライランモード: 検出結果と削減容量を表示
             if args.verbose {
                 println!(
-                    "\n{}: {}",
+                    "\n{}: {} ({}: {})",
                     msg(Msg::DuplicateFiles),
-                    group.duplicates.len() + 1
+                    dup_count + 1,
+                    msg(Msg::GroupSavings),
+                    format_size(group_savings)
                 );
-                println!("  [source] {}", group.source.path.display());
+                println!("  [source] {} ({})", group.source.path.display(), format_size(group.source.size));
                 for dup in &group.duplicates {
                     println!("  [dup]    {}", dup.path.display());
                 }
@@ -117,17 +126,17 @@ fn main() {
     println!();
     if args.dry_run {
         println!("{}", msg(Msg::SummaryDryRun));
+        println!("  {}: {}", msg(Msg::TotalDuplicates), stats.total_duplicates);
+        println!("  {}: {}", msg(Msg::EstimatedSavings), format_size(stats.total_savings));
     } else {
         println!("{}", msg(Msg::SummaryComplete));
-    }
-    println!("  {}: {}", msg(Msg::TotalDuplicates), stats.total_duplicates);
-
-    if !args.dry_run {
+        println!("  {}: {}", msg(Msg::TotalDuplicates), stats.total_duplicates);
         println!("  {}: {}", msg(Msg::TotalReplaced), stats.replaced);
         let skipped = stats.already_linked + stats.cross_filesystem;
         println!("  {}: {}", msg(Msg::TotalSkipped), skipped);
         if stats.errors > 0 {
             println!("  {}: {}", msg(Msg::TotalErrors), stats.errors);
         }
+        println!("  {}: {}", msg(Msg::TotalSavings), format_size(stats.total_savings));
     }
 }

@@ -9,6 +9,29 @@ pub fn is_japanese() -> bool {
         .unwrap_or(false)
 }
 
+/// バイト数を人間が読みやすい形式にフォーマットする
+///
+/// Args:
+///     bytes: バイト数
+///
+/// Returns:
+///     フォーマットされた文字列 (例: "1.5 MB")
+pub fn format_size(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = 1024 * KB;
+    const GB: u64 = 1024 * MB;
+
+    if bytes >= GB {
+        format!("{:.2} GB", bytes as f64 / GB as f64)
+    } else if bytes >= MB {
+        format!("{:.2} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.2} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{} B", bytes)
+    }
+}
+
 /// メッセージキー
 #[derive(Clone, Copy)]
 pub enum Msg {
@@ -38,6 +61,11 @@ pub enum Msg {
     TotalReplaced,
     TotalSkipped,
     TotalErrors,
+
+    // 削減容量
+    GroupSavings,
+    EstimatedSavings,
+    TotalSavings,
 }
 
 /// ローカライズされたメッセージを取得する
@@ -77,6 +105,11 @@ fn msg_ja(key: Msg) -> &'static str {
         Msg::TotalReplaced => "置換成功",
         Msg::TotalSkipped => "スキップ",
         Msg::TotalErrors => "エラー",
+
+        // 削減容量
+        Msg::GroupSavings => "グループ削減容量",
+        Msg::EstimatedSavings => "見込み削減容量",
+        Msg::TotalSavings => "合計削減容量",
     }
 }
 
@@ -108,6 +141,11 @@ fn msg_en(key: Msg) -> &'static str {
         Msg::TotalReplaced => "Replaced",
         Msg::TotalSkipped => "Skipped",
         Msg::TotalErrors => "Errors",
+
+        // Savings
+        Msg::GroupSavings => "Group savings",
+        Msg::EstimatedSavings => "Estimated savings",
+        Msg::TotalSavings => "Total savings",
     }
 }
 
@@ -145,11 +183,40 @@ mod tests {
             Msg::TotalReplaced,
             Msg::TotalSkipped,
             Msg::TotalErrors,
+            Msg::GroupSavings,
+            Msg::EstimatedSavings,
+            Msg::TotalSavings,
         ];
 
         for key in keys {
             assert!(!msg_ja(key).is_empty());
             assert!(!msg_en(key).is_empty());
         }
+    }
+
+    #[test]
+    fn test_format_size_bytes() {
+        assert_eq!(format_size(0), "0 B");
+        assert_eq!(format_size(512), "512 B");
+        assert_eq!(format_size(1023), "1023 B");
+    }
+
+    #[test]
+    fn test_format_size_kilobytes() {
+        assert_eq!(format_size(1024), "1.00 KB");
+        assert_eq!(format_size(1536), "1.50 KB");
+        assert_eq!(format_size(1024 * 1023), "1023.00 KB");
+    }
+
+    #[test]
+    fn test_format_size_megabytes() {
+        assert_eq!(format_size(1024 * 1024), "1.00 MB");
+        assert_eq!(format_size(1024 * 1024 * 100), "100.00 MB");
+    }
+
+    #[test]
+    fn test_format_size_gigabytes() {
+        assert_eq!(format_size(1024 * 1024 * 1024), "1.00 GB");
+        assert_eq!(format_size(1024 * 1024 * 1024 * 2), "2.00 GB");
     }
 }

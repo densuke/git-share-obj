@@ -15,6 +15,8 @@ pub struct GitObjectInfo {
     pub hash: String,
     /// ファイルの作成時刻
     pub created: SystemTime,
+    /// ファイルサイズ (バイト)
+    pub size: u64,
 }
 
 impl GitObjectInfo {
@@ -45,11 +47,13 @@ impl GitObjectInfo {
         let hash = format!("{}{}", dir_name, file_name);
         let metadata = fs::metadata(path).ok()?;
         let created = metadata.modified().ok()?;
+        let size = metadata.len();
 
         Some(GitObjectInfo {
             path: path.to_path_buf(),
             hash,
             created,
+            size,
         })
     }
 }
@@ -189,6 +193,8 @@ mod tests {
         assert!(info.is_some());
         let info = info.unwrap();
         assert_eq!(info.hash, "abcdef1234567890abcdef1234567890abcdef12");
+        // "test"は4バイト
+        assert_eq!(info.size, 4);
     }
 
     #[test]
