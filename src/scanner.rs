@@ -1,6 +1,7 @@
 //! Gitオブジェクトファイルの探索
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -97,6 +98,29 @@ pub fn scan_git_objects(base_path: &Path) -> Vec<GitObjectInfo> {
     }
 
     objects
+}
+
+/// 指定ディレクトリ以下のGitリポジトリルートを列挙する
+///
+/// `.git/objects` が存在するディレクトリをGitリポジトリとして扱い、
+/// リポジトリルート（`.git` の親ディレクトリ）を重複なく返す。
+pub fn find_git_repositories(base_path: &Path) -> Vec<PathBuf> {
+    let mut repos = HashSet::new();
+
+    for entry in WalkDir::new(base_path).into_iter().filter_map(|e| e.ok()) {
+        let path = entry.path();
+        if path.ends_with(".git/objects") && path.is_dir() {
+            if let Some(git_dir) = path.parent() {
+                if let Some(repo_root) = git_dir.parent() {
+                    repos.insert(repo_root.to_path_buf());
+                }
+            }
+        }
+    }
+
+    let mut repo_list: Vec<_> = repos.into_iter().collect();
+    repo_list.sort();
+    repo_list
 }
 
 /// 重複ファイルのグループ
@@ -570,5 +594,37 @@ mod tests {
         let objects: Vec<GitObjectInfo> = vec![];
         let device_groups = group_by_device(objects);
         assert!(device_groups.is_empty());
+    }
+
+    #[test]
+    fn test_find_git_repositories_single() {
+        let temp_dir = TempDir::new().unwrap();
+        let repo = temp_dir.path().join("repo1");
+        fs::create_dir_all(repo.join(".git/objects/ab")).unwrap();
+        File::create(repo.join(".git/objects/ab/cdef1234567890abcdef1234567890abcdef12")).unwrap();
+
+        let repos = find_git_repositories(temp_dir.path());
+        assert_eq!(repos.len(), 1);
+        assert_eq!(repos[0], repo);
+    }
+
+    #[test]
+    fn test_find_git_repositories_multiple_and_unique() {
+        let temp_dir = TempDir::new().unwrap();
+        let repo1 = temp_dir.path().join("repo1");
+        let repo2 = temp_dir.path().join("nested/repo2");
+
+        fs::create_dir_all(repo1.join(".git/objects/ab")).unwrap();
+        fs::create_dir_all(repo1.join(".git/objects/cd")).unwrap();
+        fs::create_dir_all(repo2.join(".git/objects/ef")).unwrap();
+
+        File::create(repo1.join(".git/objects/ab/cdef1234567890abcdef1234567890abcdef12")).unwrap();
+        File::create(repo1.join(".git/objects/cd/ef12345678901234567890123456789012abcd")).unwrap();
+        File::create(repo2.join(".git/objects/ef/1234567890abcdef1234567890abcdef123456")).unwrap();
+
+        let repos = find_git_repositories(temp_dir.path());
+        assert_eq!(repos.len(), 2);
+        assert!(repos.contains(&repo1));
+        assert!(repos.contains(&repo2));
     }
 }
