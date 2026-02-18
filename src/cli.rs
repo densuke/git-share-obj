@@ -26,6 +26,10 @@ pub struct Args {
     /// ハードリンク処理は行わず、fsckのみ実行
     #[arg(long = "fsck-only")]
     pub fsck_only: bool,
+
+    /// リポジトリロックをスキップ（速度優先、非推奨）
+    #[arg(long = "no-lock")]
+    pub no_lock: bool,
 }
 
 impl Args {
@@ -47,6 +51,7 @@ mod tests {
         assert!(!args.verbose);
         assert!(!args.no_fsck);
         assert!(!args.fsck_only);
+        assert!(!args.no_lock);
     }
 
     #[test]
@@ -120,6 +125,15 @@ mod tests {
         let args = Args::parse_from(["git-share-obj", "--no-fsck", "--fsck-only", "/path/a"]);
         assert!(args.no_fsck);
         assert!(args.fsck_only);
+        assert!(!args.no_lock);
         assert_eq!(args.paths, vec!["/path/a"]);
+    }
+
+    #[test]
+    fn test_no_lock_long() {
+        let args = Args::parse_from(["git-share-obj", "--no-lock"]);
+        assert!(args.no_lock);
+        assert!(!args.no_fsck);
+        assert!(!args.fsck_only);
     }
 }
