@@ -18,6 +18,14 @@ pub struct Args {
     /// 詳細出力
     #[arg(short, long)]
     pub verbose: bool,
+
+    /// fsckチェックをスキップ（速度優先）
+    #[arg(long = "no-fsck")]
+    pub no_fsck: bool,
+
+    /// ハードリンク処理は行わず、fsckのみ実行
+    #[arg(long = "fsck-only")]
+    pub fsck_only: bool,
 }
 
 impl Args {
@@ -37,6 +45,8 @@ mod tests {
         assert_eq!(args.paths, vec!["."]);
         assert!(!args.dry_run);
         assert!(!args.verbose);
+        assert!(!args.no_fsck);
+        assert!(!args.fsck_only);
     }
 
     #[test]
@@ -89,5 +99,27 @@ mod tests {
         assert!(args.dry_run);
         assert!(args.verbose);
         assert_eq!(args.paths, vec!["/path/a", "/path/b"]);
+    }
+
+    #[test]
+    fn test_no_fsck_long() {
+        let args = Args::parse_from(["git-share-obj", "--no-fsck"]);
+        assert!(args.no_fsck);
+        assert!(!args.fsck_only);
+    }
+
+    #[test]
+    fn test_fsck_only_long() {
+        let args = Args::parse_from(["git-share-obj", "--fsck-only"]);
+        assert!(args.fsck_only);
+        assert!(!args.no_fsck);
+    }
+
+    #[test]
+    fn test_no_fsck_and_fsck_only_together() {
+        let args = Args::parse_from(["git-share-obj", "--no-fsck", "--fsck-only", "/path/a"]);
+        assert!(args.no_fsck);
+        assert!(args.fsck_only);
+        assert_eq!(args.paths, vec!["/path/a"]);
     }
 }
