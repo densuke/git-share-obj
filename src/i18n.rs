@@ -49,6 +49,8 @@ pub enum Msg {
     Processing,
     ProcessingDevice,
     DeviceGroups,
+    ScanningPath,
+    CheckingDirectory,
 
     // 結果メッセージ
     Replaced,
@@ -68,6 +70,26 @@ pub enum Msg {
     GroupSavings,
     EstimatedSavings,
     TotalSavings,
+
+    // fsck
+    FsckRunning,
+    FsckOk,
+    FsckFailed,
+    FsckSummary,
+    FsckOnlyComplete,
+    FsckSkipped,
+    AbortOnFsckFailure,
+
+    // lock
+    LockingRepo,
+    LockAcquired,
+    LockFailed,
+    LockSkipped,
+    LockSummary,
+
+    // rollback
+    RollbackOccurred,
+    RollbackFailed,
 }
 
 /// ローカライズされたメッセージを取得する
@@ -95,6 +117,8 @@ fn msg_ja(key: Msg) -> &'static str {
         Msg::Processing => "処理中...",
         Msg::ProcessingDevice => "デバイス処理中",
         Msg::DeviceGroups => "デバイスグループ",
+        Msg::ScanningPath => "探索ルート",
+        Msg::CheckingDirectory => "確認中ディレクトリ",
 
         // 結果メッセージ
         Msg::Replaced => "置換完了",
@@ -114,6 +138,26 @@ fn msg_ja(key: Msg) -> &'static str {
         Msg::GroupSavings => "グループ削減容量",
         Msg::EstimatedSavings => "見込み削減容量",
         Msg::TotalSavings => "合計削減容量",
+
+        // fsck
+        Msg::FsckRunning => "fsck実行中",
+        Msg::FsckOk => "fsck成功",
+        Msg::FsckFailed => "fsck失敗",
+        Msg::FsckSummary => "fsck集計",
+        Msg::FsckOnlyComplete => "=== fsckのみ完了 ===",
+        Msg::FsckSkipped => "fsckスキップ (--no-fsck)",
+        Msg::AbortOnFsckFailure => "fsck失敗のため置換処理を中止",
+
+        // lock
+        Msg::LockingRepo => "ロック取得中",
+        Msg::LockAcquired => "ロック取得",
+        Msg::LockFailed => "ロック取得失敗",
+        Msg::LockSkipped => "ロック処理スキップ (--no-lock)",
+        Msg::LockSummary => "ロック集計",
+
+        // rollback
+        Msg::RollbackOccurred => "ロールバック",
+        Msg::RollbackFailed => "ロールバック失敗",
     }
 }
 
@@ -133,6 +177,8 @@ fn msg_en(key: Msg) -> &'static str {
         Msg::Processing => "Processing...",
         Msg::ProcessingDevice => "Processing device",
         Msg::DeviceGroups => "device groups",
+        Msg::ScanningPath => "Scanning root",
+        Msg::CheckingDirectory => "Checking directory",
 
         // Results
         Msg::Replaced => "Replaced",
@@ -152,6 +198,26 @@ fn msg_en(key: Msg) -> &'static str {
         Msg::GroupSavings => "Group savings",
         Msg::EstimatedSavings => "Estimated savings",
         Msg::TotalSavings => "Total savings",
+
+        // fsck
+        Msg::FsckRunning => "Running fsck",
+        Msg::FsckOk => "fsck ok",
+        Msg::FsckFailed => "fsck failed",
+        Msg::FsckSummary => "fsck summary",
+        Msg::FsckOnlyComplete => "=== fsck-only complete ===",
+        Msg::FsckSkipped => "fsck skipped (--no-fsck)",
+        Msg::AbortOnFsckFailure => "Aborting replacement due to fsck failure",
+
+        // lock
+        Msg::LockingRepo => "Acquiring lock",
+        Msg::LockAcquired => "Lock acquired",
+        Msg::LockFailed => "Lock failed",
+        Msg::LockSkipped => "Locking skipped (--no-lock)",
+        Msg::LockSummary => "lock summary",
+
+        // rollback
+        Msg::RollbackOccurred => "Rollback",
+        Msg::RollbackFailed => "Rollback failed",
     }
 }
 
@@ -181,6 +247,8 @@ mod tests {
             Msg::Processing,
             Msg::ProcessingDevice,
             Msg::DeviceGroups,
+            Msg::ScanningPath,
+            Msg::CheckingDirectory,
             Msg::Replaced,
             Msg::AlreadyLinked,
             Msg::CrossFilesystem,
@@ -194,6 +262,20 @@ mod tests {
             Msg::GroupSavings,
             Msg::EstimatedSavings,
             Msg::TotalSavings,
+            Msg::FsckRunning,
+            Msg::FsckOk,
+            Msg::FsckFailed,
+            Msg::FsckSummary,
+            Msg::FsckOnlyComplete,
+            Msg::FsckSkipped,
+            Msg::AbortOnFsckFailure,
+            Msg::LockingRepo,
+            Msg::LockAcquired,
+            Msg::LockFailed,
+            Msg::LockSkipped,
+            Msg::LockSummary,
+            Msg::RollbackOccurred,
+            Msg::RollbackFailed,
         ];
 
         for key in keys {

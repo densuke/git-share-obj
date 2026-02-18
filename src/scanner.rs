@@ -1,6 +1,7 @@
 //! Gitオブジェクトファイルの探索
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -8,6 +9,8 @@ use walkdir::WalkDir;
 
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
+
+const PROGRESS_INTERVAL: usize = 1000;
 
 /// Gitオブジェクトファイルの情報
 #[derive(Debug, Clone)]
@@ -81,14 +84,27 @@ impl GitObjectInfo {
 /// Returns:
 ///     発見した全てのGitオブジェクト情報のベクタ
 pub fn scan_git_objects(base_path: &Path) -> Vec<GitObjectInfo> {
+    scan_git_objects_with_progress(base_path, |_| {})
+}
+
+/// 指定ディレクトリ以下の全ての.git/objectsを探索する（進捗通知付き）
+pub fn scan_git_objects_with_progress<F>(base_path: &Path, mut on_progress: F) -> Vec<GitObjectInfo>
+where
+    F: FnMut(&Path),
+{
     let mut objects = Vec::new();
+    let mut scanned_entries = 0usize;
 
     // base_path以下の全ての.gitディレクトリを探索
     for entry in WalkDir::new(base_path)
         .into_iter()
         .filter_map(|e| e.ok())
     {
+        scanned_entries += 1;
         let path = entry.path();
+        if scanned_entries.is_multiple_of(PROGRESS_INTERVAL) {
+            on_progress(path);
+        }
 
         // .git/objectsディレクトリを発見したら、その中を探索
         if path.ends_with(".git/objects") && path.is_dir() {
@@ -97,6 +113,42 @@ pub fn scan_git_objects(base_path: &Path) -> Vec<GitObjectInfo> {
     }
 
     objects
+}
+
+/// 指定ディレクトリ以下のGitリポジトリルートを列挙する
+///
+/// `.git/objects` が存在するディレクトリをGitリポジトリとして扱い、
+/// リポジトリルート（`.git` の親ディレクトリ）を重複なく返す。
+pub fn find_git_repositories(base_path: &Path) -> Vec<PathBuf> {
+    find_git_repositories_with_progress(base_path, |_| {})
+}
+
+/// 指定ディレクトリ以下のGitリポジトリルートを列挙する（進捗通知付き）
+pub fn find_git_repositories_with_progress<F>(base_path: &Path, mut on_progress: F) -> Vec<PathBuf>
+where
+    F: FnMut(&Path),
+{
+    let mut repos = HashSet::new();
+    let mut scanned_entries = 0usize;
+
+    for entry in WalkDir::new(base_path).into_iter().filter_map(|e| e.ok()) {
+        scanned_entries += 1;
+        let path = entry.path();
+        if scanned_entries.is_multiple_of(PROGRESS_INTERVAL) {
+            on_progress(path);
+        }
+        if path.ends_with(".git/objects") && path.is_dir() {
+            if let Some(git_dir) = path.parent() {
+                if let Some(repo_root) = git_dir.parent() {
+                    repos.insert(repo_root.to_path_buf());
+                }
+            }
+        }
+    }
+
+    let mut repo_list: Vec<_> = repos.into_iter().collect();
+    repo_list.sort();
+    repo_list
 }
 
 /// 重複ファイルのグループ
@@ -147,7 +199,7 @@ pub fn find_duplicates(objects: Vec<GitObjectInfo>) -> Vec<DuplicateGroup> {
     groups
         .into_values()
         .filter(|v| v.len() >= 2)
-        .filter_map(|files| select_source_and_duplicates(files))
+        .filter_map(select_source_and_duplicates)
         .collect()
 }
 
@@ -237,6 +289,7 @@ mod tests {
     use super::*;
     use std::fs::{self, File};
     use std::io::Write;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use tempfile::TempDir;
 
     /// テスト用の.git/objects構造を作成する
@@ -570,5 +623,77 @@ mod tests {
         let objects: Vec<GitObjectInfo> = vec![];
         let device_groups = group_by_device(objects);
         assert!(device_groups.is_empty());
+    }
+
+    #[test]
+    fn test_find_git_repositories_single() {
+        let temp_dir = TempDir::new().unwrap();
+        let repo = temp_dir.path().join("repo1");
+        fs::create_dir_all(repo.join(".git/objects/ab")).unwrap();
+        File::create(repo.join(".git/objects/ab/cdef1234567890abcdef1234567890abcdef12")).unwrap();
+
+        let repos = find_git_repositories(temp_dir.path());
+        assert_eq!(repos.len(), 1);
+        assert_eq!(repos[0], repo);
+    }
+
+    #[test]
+    fn test_find_git_repositories_multiple_and_unique() {
+        let temp_dir = TempDir::new().unwrap();
+        let repo1 = temp_dir.path().join("repo1");
+        let repo2 = temp_dir.path().join("nested/repo2");
+
+        fs::create_dir_all(repo1.join(".git/objects/ab")).unwrap();
+        fs::create_dir_all(repo1.join(".git/objects/cd")).unwrap();
+        fs::create_dir_all(repo2.join(".git/objects/ef")).unwrap();
+
+        File::create(repo1.join(".git/objects/ab/cdef1234567890abcdef1234567890abcdef12")).unwrap();
+        File::create(repo1.join(".git/objects/cd/ef12345678901234567890123456789012abcd")).unwrap();
+        File::create(repo2.join(".git/objects/ef/1234567890abcdef1234567890abcdef123456")).unwrap();
+
+        let repos = find_git_repositories(temp_dir.path());
+        assert_eq!(repos.len(), 2);
+        assert!(repos.contains(&repo1));
+        assert!(repos.contains(&repo2));
+    }
+
+    #[test]
+    fn test_find_git_repositories_with_progress_callback_invoked() {
+        let temp_dir = TempDir::new().unwrap();
+        let repo = temp_dir.path().join("repo1");
+        fs::create_dir_all(repo.join(".git/objects/ab")).unwrap();
+        File::create(repo.join(".git/objects/ab/cdef1234567890abcdef1234567890abcdef12")).unwrap();
+
+        for i in 0..PROGRESS_INTERVAL {
+            fs::create_dir_all(temp_dir.path().join(format!("noise/dir-{}", i))).unwrap();
+        }
+
+        let calls = AtomicUsize::new(0);
+        let repos = find_git_repositories_with_progress(temp_dir.path(), |_p| {
+            calls.fetch_add(1, Ordering::Relaxed);
+        });
+
+        assert!(!repos.is_empty());
+        assert!(calls.load(Ordering::Relaxed) >= 1);
+    }
+
+    #[test]
+    fn test_scan_git_objects_with_progress_callback_invoked() {
+        let temp_dir = TempDir::new().unwrap();
+        let repo = temp_dir.path().join("repo1");
+        fs::create_dir_all(repo.join(".git/objects/ab")).unwrap();
+        File::create(repo.join(".git/objects/ab/cdef1234567890abcdef1234567890abcdef12")).unwrap();
+
+        for i in 0..PROGRESS_INTERVAL {
+            fs::create_dir_all(temp_dir.path().join(format!("noise2/dir-{}", i))).unwrap();
+        }
+
+        let calls = AtomicUsize::new(0);
+        let objects = scan_git_objects_with_progress(temp_dir.path(), |_p| {
+            calls.fetch_add(1, Ordering::Relaxed);
+        });
+
+        assert_eq!(objects.len(), 1);
+        assert!(calls.load(Ordering::Relaxed) >= 1);
     }
 }
