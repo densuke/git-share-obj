@@ -6,6 +6,9 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use walkdir::WalkDir;
 
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
+
 /// Gitオブジェクトファイルの情報
 #[derive(Debug, Clone)]
 pub struct GitObjectInfo {
@@ -17,6 +20,10 @@ pub struct GitObjectInfo {
     pub created: SystemTime,
     /// ファイルサイズ (バイト)
     pub size: u64,
+    /// inode番号 (Unix系のみ、ハードリンク検出用)
+    pub inode: u64,
+    /// デバイスID (Unix系のみ、ファイルシステム識別用)
+    pub device: u64,
 }
 
 impl GitObjectInfo {
@@ -49,11 +56,19 @@ impl GitObjectInfo {
         let created = metadata.modified().ok()?;
         let size = metadata.len();
 
+        #[cfg(unix)]
+        let (inode, device) = (metadata.ino(), metadata.dev());
+
+        #[cfg(not(unix))]
+        let (inode, device) = (0, 0);
+
         Some(GitObjectInfo {
             path: path.to_path_buf(),
             hash,
             created,
             size,
+            inode,
+            device,
         })
     }
 }
@@ -87,19 +102,22 @@ pub fn scan_git_objects(base_path: &Path) -> Vec<GitObjectInfo> {
 /// 重複ファイルのグループ
 #[derive(Debug)]
 pub struct DuplicateGroup {
-    /// 基準ファイル (最古のタイムスタンプ)
+    /// 基準ファイル (既存ハードリンクグループの代表、または最古のファイル)
     pub source: GitObjectInfo,
-    /// 重複ファイルのリスト (ハードリンクに置換する対象)
+    /// 重複ファイルのリスト (ハードリンクに置換する対象、既にリンク済みは含まない)
     pub duplicates: Vec<GitObjectInfo>,
 }
 
 /// オブジェクトファイルを同一ハッシュでグループ化し、重複グループを返す
 ///
+/// 既存のハードリンクグループがある場合は、そのグループを優先してsourceとする。
+/// これにより、後から古いファイルが追加されても既存のハードリンクを壊さない。
+///
 /// Args:
 ///     objects: 探索で発見したオブジェクト情報のリスト
 ///
 /// Returns:
-///     2つ以上のファイルが存在するグループのみ返す
+///     2つ以上のファイルが存在し、かつ未リンクファイルがあるグループのみ返す
 pub fn find_duplicates(objects: Vec<GitObjectInfo>) -> Vec<DuplicateGroup> {
     // ハッシュ値でグループ化
     let mut groups: HashMap<String, Vec<GitObjectInfo>> = HashMap::new();
@@ -107,20 +125,55 @@ pub fn find_duplicates(objects: Vec<GitObjectInfo>) -> Vec<DuplicateGroup> {
         groups.entry(obj.hash.clone()).or_default().push(obj);
     }
 
-    // 2つ以上のファイルがあるグループのみ抽出
+    // 2つ以上のファイルがあるグループを処理
     groups
         .into_values()
         .filter(|v| v.len() >= 2)
-        .map(|mut files| {
-            // タイムスタンプでソート (最古が先頭)
-            files.sort_by_key(|f| f.created);
-            let source = files.remove(0);
-            DuplicateGroup {
-                source,
-                duplicates: files,
-            }
-        })
+        .filter_map(|files| select_source_and_duplicates(files))
         .collect()
+}
+
+/// グループ内からsourceと未リンクのduplicatesを選定する
+///
+/// 1. 同一inode (同一デバイス上) のファイルをサブグループ化
+/// 2. 最大のサブグループ (最も多くリンクされている) のファイルをsource候補
+/// 3. source候補の中から1つを選び、他のサブグループのファイルをduplicatesに
+fn select_source_and_duplicates(files: Vec<GitObjectInfo>) -> Option<DuplicateGroup> {
+    // (device, inode) でサブグループ化
+    let mut inode_groups: HashMap<(u64, u64), Vec<GitObjectInfo>> = HashMap::new();
+    for file in files {
+        inode_groups
+            .entry((file.device, file.inode))
+            .or_default()
+            .push(file);
+    }
+
+    // 最大のサブグループを見つける (同数なら最初に見つかったもの)
+    let (source_key, _) = inode_groups
+        .iter()
+        .max_by_key(|(_, group)| group.len())?;
+
+    let source_key = *source_key;
+
+    // sourceグループから1つを選ぶ (最古のもの)
+    let mut source_candidates: Vec<_> = inode_groups
+        .remove(&source_key)
+        .unwrap_or_default();
+    source_candidates.sort_by_key(|f| f.created);
+    let source = source_candidates.into_iter().next()?;
+
+    // 他のサブグループのファイルをduplicatesとして収集
+    let duplicates: Vec<_> = inode_groups
+        .into_values()
+        .flatten()
+        .collect();
+
+    // 置換対象がなければNone
+    if duplicates.is_empty() {
+        return None;
+    }
+
+    Some(DuplicateGroup { source, duplicates })
 }
 
 /// .git/objectsディレクトリ内のオブジェクトファイルを探索する
@@ -342,17 +395,15 @@ mod tests {
     }
 
     #[test]
-    fn test_find_duplicates_oldest_is_source() {
+    fn test_find_duplicates_all_independent_files() {
         let temp_dir = TempDir::new().unwrap();
 
-        // 3つのリポジトリに同じハッシュのファイルを作成
-        let mut paths = Vec::new();
+        // 3つのリポジトリに同じハッシュのファイルを作成 (全て独立)
         for repo in ["repo1", "repo2", "repo3"] {
             let obj_dir = temp_dir.path().join(repo).join(".git/objects/ab");
             fs::create_dir_all(&obj_dir).unwrap();
             let file = obj_dir.join("cdef1234567890abcdef1234567890abcdef12");
-            File::create(&file).unwrap();
-            paths.push(file);
+            File::create(&file).unwrap().write_all(b"test").unwrap();
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
 
@@ -360,11 +411,118 @@ mod tests {
         let duplicates = find_duplicates(objects);
 
         assert_eq!(duplicates.len(), 1);
-        // 最古のファイルがsourceになっているか確認
+        // 全て独立なので、1つがsource、残り2つがduplicates
         assert_eq!(duplicates[0].duplicates.len(), 2);
-        // sourceは最も古いタイムスタンプを持つ
-        for dup in &duplicates[0].duplicates {
-            assert!(duplicates[0].source.created <= dup.created);
+    }
+
+    #[test]
+    fn test_find_duplicates_existing_hardlink_is_source() {
+        let temp_dir = TempDir::new().unwrap();
+
+        // repo1とrepo2に同じハッシュのファイルを作成 (repo1が古い)
+        let obj_dir1 = temp_dir.path().join("repo1/.git/objects/ab");
+        fs::create_dir_all(&obj_dir1).unwrap();
+        let file1 = obj_dir1.join("cdef1234567890abcdef1234567890abcdef12");
+        File::create(&file1).unwrap().write_all(b"test").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+
+        let obj_dir2 = temp_dir.path().join("repo2/.git/objects/ab");
+        fs::create_dir_all(&obj_dir2).unwrap();
+        let file2 = obj_dir2.join("cdef1234567890abcdef1234567890abcdef12");
+        File::create(&file2).unwrap().write_all(b"test").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+
+        // repo2とrepo3をハードリンクにする (repo3が最も新しいが、repo2とリンク済み)
+        let obj_dir3 = temp_dir.path().join("repo3/.git/objects/ab");
+        fs::create_dir_all(&obj_dir3).unwrap();
+        let file3 = obj_dir3.join("cdef1234567890abcdef1234567890abcdef12");
+        fs::hard_link(&file2, &file3).unwrap();
+
+        let objects = scan_git_objects(temp_dir.path());
+        let duplicates = find_duplicates(objects);
+
+        // repo1は古いが単独、repo2/repo3はハードリンク済み
+        // よってrepo2/repo3グループがsourceになり、repo1がduplicateになる
+        assert_eq!(duplicates.len(), 1);
+        assert_eq!(duplicates[0].duplicates.len(), 1);
+
+        // sourceはrepo2またはrepo3 (ハードリンクグループ)
+        let source_path = duplicates[0].source.path.to_string_lossy();
+        assert!(
+            source_path.contains("repo2") || source_path.contains("repo3"),
+            "sourceはハードリンクグループから選ばれるべき: {}",
+            source_path
+        );
+
+        // duplicateはrepo1 (単独ファイル)
+        let dup_path = duplicates[0].duplicates[0].path.to_string_lossy();
+        assert!(
+            dup_path.contains("repo1"),
+            "duplicateは単独ファイルのrepo1であるべき: {}",
+            dup_path
+        );
+    }
+
+    #[test]
+    fn test_find_duplicates_all_already_linked() {
+        let temp_dir = TempDir::new().unwrap();
+
+        // 全てのファイルがハードリンク済みの場合
+        let obj_dir1 = temp_dir.path().join("repo1/.git/objects/ab");
+        fs::create_dir_all(&obj_dir1).unwrap();
+        let file1 = obj_dir1.join("cdef1234567890abcdef1234567890abcdef12");
+        File::create(&file1).unwrap().write_all(b"test").unwrap();
+
+        let obj_dir2 = temp_dir.path().join("repo2/.git/objects/ab");
+        fs::create_dir_all(&obj_dir2).unwrap();
+        let file2 = obj_dir2.join("cdef1234567890abcdef1234567890abcdef12");
+        fs::hard_link(&file1, &file2).unwrap();
+
+        let objects = scan_git_objects(temp_dir.path());
+        let duplicates = find_duplicates(objects);
+
+        // 全てリンク済みなので、置換対象なし
+        assert!(duplicates.is_empty());
+    }
+
+    #[test]
+    fn test_find_duplicates_add_new_file_to_existing_group() {
+        let temp_dir = TempDir::new().unwrap();
+
+        // 既存のハードリンクグループ (repo1, repo2)
+        let obj_dir1 = temp_dir.path().join("repo1/.git/objects/ab");
+        fs::create_dir_all(&obj_dir1).unwrap();
+        let file1 = obj_dir1.join("cdef1234567890abcdef1234567890abcdef12");
+        File::create(&file1).unwrap().write_all(b"test").unwrap();
+
+        let obj_dir2 = temp_dir.path().join("repo2/.git/objects/ab");
+        fs::create_dir_all(&obj_dir2).unwrap();
+        let file2 = obj_dir2.join("cdef1234567890abcdef1234567890abcdef12");
+        fs::hard_link(&file1, &file2).unwrap();
+
+        std::thread::sleep(std::time::Duration::from_millis(10));
+
+        // 新しいファイルを追加 (repo3, repo4は独立)
+        for repo in ["repo3", "repo4"] {
+            let obj_dir = temp_dir.path().join(repo).join(".git/objects/ab");
+            fs::create_dir_all(&obj_dir).unwrap();
+            let file = obj_dir.join("cdef1234567890abcdef1234567890abcdef12");
+            File::create(&file).unwrap().write_all(b"test").unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(10));
         }
+
+        let objects = scan_git_objects(temp_dir.path());
+        let duplicates = find_duplicates(objects);
+
+        assert_eq!(duplicates.len(), 1);
+        // 既存グループ (repo1/repo2) がsource、新規 (repo3/repo4) がduplicates
+        assert_eq!(duplicates[0].duplicates.len(), 2);
+
+        let source_path = duplicates[0].source.path.to_string_lossy();
+        assert!(
+            source_path.contains("repo1") || source_path.contains("repo2"),
+            "sourceは既存ハードリンクグループから選ばれるべき: {}",
+            source_path
+        );
     }
 }
