@@ -4,6 +4,7 @@ pub mod cli;
 pub mod fsck;
 pub mod hardlink;
 pub mod i18n;
+pub mod lock;
 pub mod scanner;
 
 #[cfg(test)]
