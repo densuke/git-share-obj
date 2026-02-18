@@ -1,5 +1,6 @@
 //! Gitオブジェクトの重複ファイルをハードリンクで共有するライブラリ
 
+pub mod app;
 pub mod cli;
 pub mod fsck;
 pub mod hardlink;
